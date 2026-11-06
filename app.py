@@ -1,10 +1,11 @@
-"""Single-asset historical replay UI with SQLite persistence."""
+"""Single-asset historical replay UI with SQLite persistence and optional personal-use sample data."""
 import hashlib
 from decimal import Decimal
 import pandas as pd
 import streamlit as st
 from data_loader import parse_bars
 from engine import Account, maximum_drawdown
+from market_data import download_default_spy
 import storage
 
 st.set_page_config(page_title="Historical Trading Lab", layout="wide")
@@ -18,19 +19,35 @@ if not session_name.strip():
 
 saved = storage.load_session(session_name)
 saved_fingerprint = saved.get("fingerprint") if saved else None
-uploaded = st.file_uploader("上传真实历史日线 CSV：date,open,high,low,close,volume", type="csv")
+
+st.subheader("获取一份默认练习行情")
+st.caption("默认标的：SPY（美国上市的标普500 ETF），最近约 5 年日线。点击后从 Yahoo Finance 获取，并保存到你这台 Mac 的 SQLite；不会把行情文件提交到 GitHub。仅供个人学习，数据使用受 Yahoo 条款约束。")
+if st.button("下载 SPY 默认练习数据（约 5 年）"):
+    with st.spinner("正在获取历史行情…"):
+        try:
+            downloaded = download_default_spy("5y")
+            parse_bars(downloaded)
+            fp = hashlib.sha256(downloaded).hexdigest()
+            storage.save_dataset(fp, "SPY_5y_yahoo_personal_use.csv", downloaded)
+            st.session_state["selected_dataset_fingerprint"] = fp
+            st.success("已下载并保存到本机 SQLite。")
+        except Exception as exc:
+            st.error(f"默认行情下载失败：{exc}")
+
+uploaded = st.file_uploader("或者上传自己的历史日线 CSV：date,open,high,low,close,volume", type="csv")
 raw = uploaded.getvalue() if uploaded else None
 filename = uploaded.name if uploaded else None
 if raw:
     fingerprint = hashlib.sha256(raw).hexdigest()
     storage.save_dataset(fingerprint, filename or "prices.csv", raw)
+    st.session_state["selected_dataset_fingerprint"] = fingerprint
 else:
-    fingerprint = saved_fingerprint
+    fingerprint = st.session_state.get("selected_dataset_fingerprint") or saved_fingerprint
     stored = storage.load_dataset(fingerprint) if fingerprint else None
     if stored:
         filename, raw = stored
 if raw is None:
-    st.info("首次使用请上传行情 CSV。上传后会保存到 SQLite，之后可恢复该数据集。")
+    st.info("先点击上方按钮获取默认 SPY 行情，或者上传自己的 CSV。")
     st.stop()
 try:
     bars = parse_bars(raw)
@@ -45,6 +62,7 @@ if saved and saved.get("fingerprint") == fingerprint:
     notes = saved.get("notes", [])
 else:
     idx, account, equity_history, notes = 0, Account(), [], []
+
 def persist():
     storage.save_session(session_name.strip(), {
         "fingerprint": fingerprint, "idx": st.session_state.idx,
