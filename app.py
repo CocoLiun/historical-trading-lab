@@ -13,7 +13,9 @@ storage.initialize()
 st.title("📈 Historical Trading Lab")
 st.caption("历史行情回放 · 收盘后决策 · 下一交易日开盘模拟成交 · 教学用途")
 st.warning("仅供学习。当前为单资产日线模型；未实现完整交易所规则、公司行动和订单簿撮合。")
-session_name = st.text_input("模拟账户名称（用于保存和恢复）", value="my-practice")
+existing_sessions = storage.list_sessions()
+selected_session = st.selectbox("恢复已有练习", ["新建 / 输入名称"] + existing_sessions)
+session_name = st.text_input("模拟账户名称（用于保存和恢复）", value=selected_session if selected_session in existing_sessions else "my-practice").strip()
 if not session_name.strip():
     st.stop()
 
@@ -29,7 +31,7 @@ if st.button("下载 SPY 默认练习数据（约 5 年）"):
             parse_bars(downloaded)
             fp = hashlib.sha256(downloaded).hexdigest()
             storage.save_dataset(fp, "SPY_5y_yahoo_personal_use.csv", downloaded)
-            st.session_state["selected_dataset_fingerprint"] = fp
+            st.session_state[f"selected_dataset_fingerprint_{session_name}"] = fp
             st.success("已下载并保存到本机 SQLite。")
         except Exception as exc:
             st.error(f"默认行情下载失败：{exc}")
@@ -39,21 +41,30 @@ raw = uploaded.getvalue() if uploaded else None
 filename = uploaded.name if uploaded else None
 if raw:
     fingerprint = hashlib.sha256(raw).hexdigest()
-    storage.save_dataset(fingerprint, filename or "prices.csv", raw)
-    st.session_state["selected_dataset_fingerprint"] = fingerprint
+
 else:
-    fingerprint = st.session_state.get("selected_dataset_fingerprint") or saved_fingerprint
+    fingerprint = st.session_state.get(f"selected_dataset_fingerprint_{session_name}") or saved_fingerprint
     stored = storage.load_dataset(fingerprint) if fingerprint else None
     if stored:
         filename, raw = stored
+if raw is not None and saved_fingerprint and fingerprint != saved_fingerprint:
+    st.warning("此数据与当前练习不同。替换会清空该练习的进度；也可以输入新账户名称另建练习。")
+    if not st.checkbox("确认替换当前练习的数据并清空进度", key=f"replace_{session_name}_{fingerprint}"):
+        st.stop()
 if raw is None:
     st.info("先点击上方按钮获取默认 SPY 行情，或者上传自己的 CSV。")
     st.stop()
+@st.cache_data(show_spinner=False)
+def cached_bars(content):
+    return parse_bars(content)
+
 try:
-    bars = parse_bars(raw)
+    bars = cached_bars(raw)
 except Exception as exc:
     st.error(f"数据导入失败：{exc}")
     st.stop()
+
+storage.save_dataset(fingerprint, filename or "prices.csv", raw)
 
 if saved and saved.get("fingerprint") == fingerprint:
     idx = min(int(saved.get("idx", 0)), len(bars)-1)
@@ -65,7 +76,7 @@ else:
 
 def persist():
     storage.save_session(session_name.strip(), {
-        "fingerprint": fingerprint, "idx": st.session_state.idx,
+        "market": market, "fingerprint": fingerprint, "idx": st.session_state.idx,
         "cash": str(st.session_state.account.cash), "shares": st.session_state.account.shares,
         "trades": st.session_state.account.trades, "equity": st.session_state.equity,
         "notes": st.session_state.notes
@@ -79,6 +90,9 @@ if st.session_state.get("active_session") != session_name.strip() or st.session_
     st.session_state.equity = equity_history
     st.session_state.notes = notes
 
+market = st.selectbox("交易模式", ["generic", "a_share"], index=1 if saved and saved.get("market") == "a_share" else 0,
+    format_func=lambda x: "通用模式" if x == "generic" else "A 股基础规则（买入100股整数倍、T+1）")
+st.caption("A 股基础模式未模拟板块涨跌停、历史制度变化和公司行动；切换模式会在下次保存时记录。")
 i = st.session_state.idx
 account = st.session_state.account
 today = bars[i]
@@ -96,7 +110,7 @@ with st.form("place_order"):
     submit = st.form_submit_button("下单并推进一个交易日", disabled=i >= len(bars)-1)
     if submit:
         try:
-            trade = account.execute_next_open(bars[i+1], side, int(qty), decision_date=today.day)
+            trade = account.execute_next_open(bars[i+1], side, int(qty), decision_date=today.day, market=market)
             st.session_state.idx += 1
             st.session_state.notes.append({"date":today.day.isoformat(),"note":note,"decision":f"{side} {qty}"})
             st.session_state.equity.append({"date":bars[i+1].day.isoformat(),"equity":str(account.equity(bars[i+1].close))})
@@ -110,12 +124,25 @@ if st.button("跳过一个交易日", disabled=i >= len(bars)-1):
     st.session_state.equity.append({"date":bars[i+1].day.isoformat(),"equity":str(account.equity(bars[i+1].close))})
     persist()
     st.rerun()
+initial_equity = Decimal("100000")
+current_equity = account.equity(today.close)
+benchmark_equity = initial_equity * today.close / bars[0].close
+r1, r2, r3 = st.columns(3)
+r1.metric("累计收益", f"{(current_equity / initial_equity - 1) * 100:.2f}%")
+r2.metric("买入持有基准（不计费用，可分股）", f"{(benchmark_equity / initial_equity - 1) * 100:.2f}%")
+r3.metric("相对基准收益（百分点）", f"{(current_equity - benchmark_equity) / initial_equity * 100:.2f}")
 st.subheader("交易流水")
 st.dataframe(pd.DataFrame(account.trades), use_container_width=True)
 if st.session_state.equity:
     values = [Decimal("100000")] + [Decimal(x["equity"]) for x in st.session_state.equity]
     st.metric("最大回撤", f"{maximum_drawdown(values)*100:.2f}%")
-    st.line_chart(pd.DataFrame([{"date":x["date"],"equity":float(x["equity"])} for x in st.session_state.equity]).set_index("date"))
+    close_by_date = {bar.day.isoformat(): bar.close for bar in bars[:i+1]}
+    comparison = [{"date": bars[0].day.isoformat(), "账户": float(initial_equity), "买入持有": float(initial_equity)}]
+    comparison += [{"date": x["date"], "账户": float(x["equity"]), "买入持有": float(initial_equity * close_by_date[x["date"]] / bars[0].close)} for x in st.session_state.equity]
+    st.line_chart(pd.DataFrame(comparison).set_index("date"))
+    daily = pd.DataFrame(comparison).set_index("date")
+    daily["每日盈亏"] = daily["账户"].diff().fillna(0)
+    st.dataframe(daily, use_container_width=True)
 st.subheader("决策笔记")
 st.dataframe(pd.DataFrame(st.session_state.notes), use_container_width=True)
 if st.button("重置当前模拟账户"):

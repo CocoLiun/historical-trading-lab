@@ -31,10 +31,18 @@ CSV columns: `date,open,high,low,close,volume`. The app does not fabricate price
 - Single-asset daily replay: after day T close, orders fill at next bar open with assumed fixed slippage and fees.
 - Past-only chart, cash/holdings, buy/sell, decision notes and drawdown.
 - Not an order-book matching engine.
-- Not yet implemented: exchange calendars, A-share T+1, lot sizes, price limits, suspensions, dividends, splits, delistings, tax, FX, volume constraints, mutual-fund NAV settlement, time-stamped historical fundamentals/news, benchmarks and strategy comparisons.
+- Not yet implemented: exchange calendars, full market-specific lot rules, price limits, suspensions, dividends, splits, delistings, tax, FX, volume constraints, mutual-fund NAV settlement, time-stamped historical fundamentals/news, benchmarks and strategy comparisons.
 - Without corporate actions this is unsuitable for accurate long-run total-return studies.
 
 Educational simulation only. No brokerage connection or investment advice.
 
 ## License
 MIT source code; third-party data may have separate terms.
+
+## Practice and comparison
+- Select an existing practice or enter a trimmed account name. Changing the dataset of a saved practice requires explicit confirmation and resets progress when the next action is saved.
+- CSV parsing is cached; duplicate datasets are stored once. SQLite connections close after each operation.
+- Performance includes cumulative return, a fractional-share buy-and-hold price benchmark (without costs), relative return in percentage points, and daily account P&L. The benchmark is not a total-return benchmark.
+- Zero-volume bars reject orders without advancing time; use Skip to move past them.
+
+Optional A-share basic mode enforces buy lots of 100 and prevents same-day resale. It does not model board-specific or historical price limits, full odd-lot rules, or corporate actions.

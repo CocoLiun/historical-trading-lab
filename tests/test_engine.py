@@ -39,3 +39,25 @@ def test_invalid_cost_is_atomic():
 
 def test_bad_initial_cash():
     with pytest.raises(ValueError): Account(Decimal("NaN"))
+
+
+def test_zero_volume_order_is_atomic():
+    a = Account()
+    b = bar()
+    halted = Bar(b.day, b.open, b.high, b.low, b.close, 0)
+    with pytest.raises(ValueError, match="zero-volume"):
+        a.execute_next_open(halted, "buy", 1)
+    assert a.cash == 100000 and a.shares == 0 and not a.trades
+
+
+def test_a_share_lot_and_t_plus_one():
+    a = Account()
+    with pytest.raises(ValueError, match="multiples"):
+        a.execute_next_open(bar(), "buy", 1, market="a_share")
+    a.execute_next_open(bar(), "buy", 100, market="a_share")
+    with pytest.raises(ValueError, match=r"T\+1"):
+        a.execute_next_open(bar(), "sell", 100, market="a_share")
+    b = bar()
+    tomorrow = Bar(date(2020, 1, 3), b.open, b.high, b.low, b.close, b.volume)
+    a.execute_next_open(tomorrow, "sell", 100, market="a_share")
+    assert a.shares == 0

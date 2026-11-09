@@ -34,8 +34,10 @@ class Account:
     def equity(self, close: Decimal):
         return self.cash + self.shares * close
 
-    def execute_next_open(self, bar: Bar, side: str, qty: int, fee_rate=Decimal("0.0003"), slippage=Decimal("0.0005"), decision_date=None):
+    def execute_next_open(self, bar: Bar, side: str, qty: int, fee_rate=Decimal("0.0003"), slippage=Decimal("0.0005"), decision_date=None, market="generic"):
         bar.validate()
+        if bar.volume == 0:
+            raise ValueError("Cannot trade a zero-volume bar")
         if decision_date is not None and bar.day <= decision_date:
             raise ValueError("Execution must follow decision date")
         if side not in ("buy", "sell") or type(qty) is not int or qty <= 0:
@@ -43,6 +45,14 @@ class Account:
         fee_rate, slippage = Decimal(str(fee_rate)), Decimal(str(slippage))
         if not fee_rate.is_finite() or not slippage.is_finite() or fee_rate < 0 or not (0 <= slippage < 1):
             raise ValueError("Invalid transaction cost")
+        if market not in ("generic", "a_share"):
+            raise ValueError("Unknown market")
+        if market == "a_share":
+            if side == "buy" and qty % 100:
+                raise ValueError("A-share buys require multiples of 100 shares")
+            bought_today = sum(t["qty"] for t in self.trades if t["side"] == "buy" and t["date"] == bar.day.isoformat())
+            if side == "sell" and qty > self.shares - bought_today:
+                raise ValueError("A-share T+1: shares bought today cannot be sold")
         if side == "sell" and qty > self.shares:
             raise ValueError("Insufficient shares")
         price = bar.open * (1 + slippage if side == "buy" else 1 - slippage)
