@@ -46,3 +46,10 @@ MIT source code; third-party data may have separate terms.
 - Zero-volume bars reject orders without advancing time; use Skip to move past them.
 
 Optional A-share basic mode enforces buy lots of 100 and prevents same-day resale. It does not model board-specific or historical price limits, full odd-lot rules, or corporate actions.
+
+## Quick start / 快速开始
+无需准备或提交报表。打开页面后点击主按钮“下载 SPY 默认练习数据”，联网获取真实历史行情；系统没有随代码附带的离线行情。下载成功后，按“看行情，做决策”买入、卖出或跳过，再到“查看收益与复盘”查看结果。下载失败可以重试，或展开可选 CSV 上传。
+
+侧栏“语言 / Language”支持中文、English 切换，切换语言不会清空练习。侧栏也可选择已有账户；交易和跳过操作会自动保存。
+
+No report is required. Download SPY prices using the primary button, decide to buy/sell/skip, then review performance. Internet access is required for downloads; no offline market dataset is bundled. Optional CSV upload and saved practice selection remain available. Use the sidebar to switch between Chinese and English without resetting progress.
